@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raffle Risk Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-base: #0a0b0f;
+    --bg-card: #12131a;
+    --bg-card-hover: #1a1b25;
+    --bg-surface: #181920;
+    --border: #2a2b3a;
+    --text-primary: #e8e9f0;
+    --text-muted: #6b6d80;
+    --text-dim: #4a4b5c;
+    --accent-lime: #84cc16;
+    --accent-purple: #a855f7;
+    --accent-purple-dim: rgba(168, 85, 247, 0.15);
+    --risk-low: #22c55e;
+    --risk-med: #eab308;
+    --risk-high: #f97316;
+    --risk-crit: #ef4444;
+    --tier1-bg: rgba(239, 68, 68, 0.12);
+    --tier1-border: rgba(239, 68, 68, 0.4);
+    --tier1-text: #fca5a5;
+    --tier2-bg: rgba(249, 115, 22, 0.12);
+    --tier2-border: rgba(249, 115, 22, 0.4);
+    --tier2-text: #fdba74;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────── */
+  .header {
+    padding: 2rem 2.5rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0f1017 0%, var(--bg-base) 100%);
+  }
+
+  .logo-group h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, var(--accent-lime), #a3e635);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .logo-group .subtitle {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+  }
+
+  .header-actions { display: flex; align-items: center; gap: 1rem; }
+
+  .meta-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+  }
+
+  .btn-scrape {
+    font-family: 'Outfit', sans-serif;
+    font-weight: 600;
+    font-size: 0.85rem;
+    padding: 0.55rem 1.4rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: var(--accent-lime);
+    color: #0a0b0f;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-scrape:hover { background: #a3e635; transform: translateY(-1px); }
+  .btn-scrape:active { transform: translateY(0); }
+  .btn-scrape:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-scrape.running {
+    background: var(--bg-surface);
+    color: var(--accent-lime);
+    border: 1px solid var(--accent-lime);
+  }
+  .btn-scrape.running::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0;
+    height: 2px;
+    background: var(--accent-lime);
+    animation: progress 30s linear forwards;
+  }
+  @keyframes progress { from { width: 0; } to { width: 100%; } }
+
+  /* ── Stats Bar ──────────────────────────── */
+  .stats-bar {
+    display: flex;
+    gap: 1px;
+    background: var(--border);
+    margin: 0 2.5rem;
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+  }
+
+  .stat-cell {
+    flex: 1;
+    background: var(--bg-card);
+    padding: 1rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .stat-cell .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .stat-cell .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+  .stat-cell .value.lime { color: var(--accent-lime); }
+  .stat-cell .value.red { color: var(--risk-crit); }
+  .stat-cell .value.orange { color: var(--risk-high); }
+  .stat-cell .value.purple { color: var(--accent-purple); }
+
+  /* ── Filter Bar ─────────────────────────── */
+  .filter-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 1.25rem 2.5rem;
+    align-items: center;
+  }
+
+  .filter-btn {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.4rem 0.9rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
+  .filter-btn.active {
+    background: var(--accent-purple-dim);
+    border-color: var(--accent-purple);
+    color: var(--accent-purple);
+  }
+
+  .sort-label {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .sort-select {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  /* ── Table ──────────────────────────────── */
+  .table-wrap {
+    padding: 0 2.5rem 3rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 4px;
+  }
+
+  thead th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--text-muted); }
+
+  tbody tr {
+    background: var(--bg-card);
+    transition: background 0.15s;
+  }
+  tbody tr:hover { background: var(--bg-card-hover); }
+
+  tbody td {
+    padding: 0.85rem 1rem;
+    font-size: 0.88rem;
+    vertical-align: middle;
+    border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+  }
+  tbody tr td:first-child { border-radius: 8px 0 0 8px; border-left: 1px solid transparent; }
+  tbody tr td:last-child { border-radius: 0 8px 8px 0; border-right: 1px solid transparent; }
+
+  /* Risk bar cell */
+  .risk-cell { display: flex; align-items: center; gap: 0.6rem; }
+  .risk-bar-track {
+    width: 60px;
+    height: 6px;
+    background: var(--bg-base);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .risk-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+  }
+  .risk-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.9rem;
+    min-width: 28px;
+  }
+
+  /* Tier badge */
+  .tier-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  .tier-badge.T1 { background: var(--tier1-bg); border: 1px solid var(--tier1-border); color: var(--tier1-text); }
+  .tier-badge.T2 { background: var(--tier2-bg); border: 1px solid var(--tier2-border); color: var(--tier2-text); }
+
+  /* User cell */
+  .user-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .user-name {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .user-links {
+    display: flex;
+    gap: 0.75rem;
+  }
+  .user-links a {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .user-links a:hover { color: var(--accent-purple); }
+
+  .mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .end-time {
+    color: var(--accent-lime);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 0.82rem;
+  }
+
+  .collection-name {
+    font-weight: 500;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Flag button */
+  .btn-flag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    border: 1px solid var(--risk-crit);
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--risk-crit);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-flag:hover {
+    background: rgba(239, 68, 68, 0.25);
+    transform: translateY(-1px);
+  }
+  .btn-flag:active { transform: translateY(0); }
+  .btn-flag.copied {
+    border-color: var(--accent-lime);
+    color: var(--accent-lime);
+    background: rgba(132, 204, 22, 0.1);
+  }
+
+  /* Toast notification */
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--accent-lime);
+    color: var(--accent-lime);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    padding: 0.7rem 1.2rem;
+    border-radius: 8px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.25s;
+    pointer-events: none;
+    z-index: 999;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* ── Empty state ────────────────────────── */
+  .empty-state {
+    text-align: center;
+    padding: 5rem 2rem;
+    color: var(--text-dim);
+  }
+  .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.4; }
+  .empty-state p { font-size: 0.95rem; max-width: 360px; margin: 0 auto; line-height: 1.6; }
+
+  /* ── Loading shimmer ────────────────────── */
+  .shimmer-row td {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer-row td::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+    animation: shimmer 1.5s infinite;
+  }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+  /* ── Responsive ─────────────────────────── */
+  @media (max-width: 900px) {
+    .header, .filter-bar, .table-wrap { padding-left: 1rem; padding-right: 1rem; }
+    .stats-bar { margin: 0 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-group">
+    <h1>RAFFLE SCANNER</h1>
+    <div class="subtitle">Risk analysis for rafffle.famousfoxes.com — T1 & T2 flagged raffles</div>
+  </div>
+  <div class="header-actions">
+    <div class="meta-chip" id="lastScrape">No data yet</div>
+    <button class="btn-scrape" id="scrapeBtn" onclick="startScrape()">Run Scrape</button>
+  </div>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-cell">
+    <span class="label">Users Scanned</span>
+    <span class="value purple" id="statTotal">—</span>
+  </div>
+  <div class="stat-cell">
+    <span class="label">Critical Risk (70+)</span>
+    <span class="value red" id="statCrit">—</span>
+  </div>
+  <div class="stat-cell">
+    <span class="label">T1 Creators</span>
+    <span class="value orange" id="statT1">—</span>
+  </div>
+  <div class="stat-cell">
+    <span class="label">T2 Creators</span>
+    <span class="value lime" id="statT2">—</span>
+  </div>
+</div>
+
+<div class="filter-bar">
+  <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+  <button class="filter-btn" onclick="setFilter('T1', this)">T1 Only</button>
+  <button class="filter-btn" onclick="setFilter('T2', this)">T2 Only</button>
+  <button class="filter-btn" onclick="setFilter('crit', this)">Critical (70+)</button>
+  <span class="sort-label">Sort by</span>
+  <select class="sort-select" id="sortSelect" onchange="renderTable()">
+    <option value="risk">Risk ↓</option>
+    <option value="time">End Time ↑</option>
+    <option value="tokens">SPL Tokens ↑</option>
+    <option value="raffles">Raffle Count ↓</option>
+  </select>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Risk</th>
+        <th>Tier</th>
+        <th>User</th>
+        <th>Collection</th>
+        <th>End Time</th>
+        <th>SPL Tokens</th>
+        <th>Live Raffles</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+    </tbody>
+  </table>
+  <div class="empty-state" id="emptyState" style="display: none;">
+    <div class="icon">◇</div>
+    <p>No raffle data yet. Hit <strong>Run Scrape</strong> to crawl the site, or wait for the daily auto-scrape.</p>
+  </div>
+</div>
+
+<script>
+let allData = [];
+let currentFilter = 'all';
+
+function flagUser(btn, profileUrl) {
+  const cmd = `!flag ${profileUrl}`;
+  navigator.clipboard.writeText(cmd).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    showToast(`Copied: ${cmd}`);
+    setTimeout(() => {
+      btn.textContent = 'Flag';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+function riskColor(risk) {
+  if (risk >= 70) return 'var(--risk-crit)';
+  if (risk >= 50) return 'var(--risk-high)';
+  if (risk >= 30) return 'var(--risk-med)';
+  return 'var(--risk-low)';
+}
+
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTable();
+}
+
+function getFiltered() {
+  let data = [...allData];
+  if (currentFilter === 'T1') data = data.filter(r => r.tier_badge === 'T1');
+  else if (currentFilter === 'T2') data = data.filter(r => r.tier_badge === 'T2');
+  else if (currentFilter === 'crit') data = data.filter(r => r.risk >= 70);
+
+  const sort = document.getElementById('sortSelect').value;
+  if (sort === 'risk') data.sort((a, b) => b.risk - a.risk);
+  else if (sort === 'time') data.sort((a, b) => (a.end_time_seconds || 0) - (b.end_time_seconds || 0));
+  else if (sort === 'tokens') data.sort((a, b) => (a.spl_token_count || 0) - (b.spl_token_count || 0));
+  else if (sort === 'raffles') data.sort((a, b) => (b.raffle_count || 0) - (a.raffle_count || 0));
+
+  return data;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  const empty = document.getElementById('emptyState');
+  const data = getFiltered();
+
+  if (data.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = data.map(r => {
+    const color = riskColor(r.risk);
+    const wallet = r.wallet || r.user_link.split('/').pop();
+    const solscan = `https://solscan.io/account/${wallet}`;
+    const twitter = `https://twitter.com/${r.user_name}`;
+
+    return `<tr>
+      <td>
+        <div class="risk-cell">
+          <span class="risk-num" style="color:${color}">${r.risk}</span>
+          <div class="risk-bar-track">
+            <div class="risk-bar-fill" style="width:${r.risk}%;background:${color}"></div>
+          </div>
+        </div>
+      </td>
+      <td><span class="tier-badge ${r.tier_badge}">${r.tier_badge}</span></td>
+      <td>
+        <div class="user-cell">
+          <span class="user-name">@${r.user_name}</span>
+          <div class="user-links">
+            <a href="${r.user_link}" target="_blank">profile</a>
+            <a href="${twitter}" target="_blank">twitter</a>
+            <a href="${solscan}" target="_blank">solscan</a>
+          </div>
+        </div>
+      </td>
+      <td><span class="collection-name">${r.collection_name || '—'}</span></td>
+      <td><span class="end-time">${r.end_time || '—'}</span></td>
+      <td class="mono">${r.spl_token_count ?? '—'}</td>
+      <td class="mono">${r.raffle_count ?? '—'}</td>
+      <td><button class="btn-flag" onclick="flagUser(this, '${r.user_link}')">Flag</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateStats() {
+  document.getElementById('statTotal').textContent = allData.length;
+  document.getElementById('statCrit').textContent = allData.filter(r => r.risk >= 70).length;
+  document.getElementById('statT1').textContent = allData.filter(r => r.tier_badge === 'T1').length;
+  document.getElementById('statT2').textContent = allData.filter(r => r.tier_badge === 'T2').length;
+}
+
+async function loadData() {
+  try {
+    const res = await fetch('/api/data');
+    const json = await res.json();
+    allData = json.raffles || [];
+
+    if (json.scraped_at) {
+      const d = new Date(json.scraped_at);
+      document.getElementById('lastScrape').textContent =
+        `Last scan: ${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+    }
+
+    updateStats();
+    renderTable();
+    updateBtnState(json.status);
+  } catch (e) {
+    console.error('Load error:', e);
+  }
+}
+
+async function startScrape() {
+  const btn = document.getElementById('scrapeBtn');
+  try {
+    const res = await fetch('/api/scrape', { method: 'POST' });
+    const json = await res.json();
+    if (json.ok) {
+      btn.textContent = 'Scraping…';
+      btn.classList.add('running');
+      btn.disabled = true;
+      pollStatus();
+    }
+  } catch (e) {
+    console.error('Scrape error:', e);
+  }
+}
+
+async function pollStatus() {
+  const btn = document.getElementById('scrapeBtn');
+  const check = async () => {
+    const res = await fetch('/api/status');
+    const status = await res.json();
+    if (!status.running) {
+      btn.textContent = 'Run Scrape';
+      btn.classList.remove('running');
+      btn.disabled = false;
+      loadData();
+      return;
+    }
+    setTimeout(check, 3000);
+  };
+  setTimeout(check, 3000);
+}
+
+function updateBtnState(status) {
+  if (!status) return;
+  const btn = document.getElementById('scrapeBtn');
+  if (status.running) {
+    btn.textContent = 'Scraping…';
+    btn.classList.add('running');
+    btn.disabled = true;
+    pollStatus();
+  }
+}
+
+// Initial load + auto-refresh every 60s
+loadData();
+setInterval(loadData, 60000);
+</script>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>
