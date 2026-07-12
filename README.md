@@ -61,6 +61,31 @@ raffle-dashboard/
     └── dashboard.html  ← Dashboard UI
 ```
 
+## X Username-Change Checker
+
+`twitter_check.py` visits `x.com/<handle>/about` for flagged users and reads
+when the account last changed its username. A change within the last 30 days
+(or an account that no longer exists) gets flagged.
+
+One-time setup — X requires a logged-in session:
+
+```
+python twitter_check.py --login
+```
+
+Log into X in the browser that opens, then close it. The session is saved to
+`data/chrome-profile/` and reused for all future (headless) checks.
+
+Try it on a single handle:
+
+```
+python twitter_check.py --test some_handle
+```
+
+Results are cached in `data/twitter_checks.json`; a handle is only re-checked
+every `CHECK_COOLDOWN_DAYS` (3) days. Tune `RECENT_CHANGE_DAYS`,
+`CHECK_COOLDOWN_DAYS`, and `DELAY_BETWEEN_CHECKS` at the top of the file.
+
 ## Adjusting Risk Scoring
 
 All risk weights are constants at the top of `scraper.py`:
