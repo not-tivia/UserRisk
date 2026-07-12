@@ -22,6 +22,14 @@ import os
 import re
 import sys
 import time
+
+# Windows consoles often default to cp1252, which chokes on characters that
+# X pages (or our output) may contain. Never let printing crash the tool.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
 from datetime import datetime, date
 from pathlib import Path
 
@@ -68,6 +76,14 @@ def create_driver(headless=True):
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--window-size=1280,1000")
+    # X serves a "JavaScript is not available" page to obvious headless bots;
+    # hide the usual automation tells
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    )
+    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     if CHROMEDRIVER_PATH:
         svc = ChromeService(executable_path=CHROMEDRIVER_PATH)
         return webdriver.Chrome(service=svc, options=opts)
@@ -200,10 +216,16 @@ def flag_result(result):
 # ─── Checking ─────────────────────────────────────────────────────────────────
 def _detect_login_wall(page_text):
     low = re.sub(r"\s+", " ", page_text).lower()
-    return bool(
-        re.search(r"sign in to x|log in to x|don.t miss what.s happening", low)
-        and "joined" not in low
+    wall_phrases = (
+        "sign in to x",
+        "log in to x",
+        "continue with apple",
+        "continue with phone",
+        "email or username",
+        "see what's happening",
+        "javascript is not available",
     )
+    return any(p in low for p in wall_phrases) and "joined" not in low
 
 
 def check_handle(driver, handle, dump_on_fail=False):
@@ -227,9 +249,9 @@ def check_handle(driver, handle, dump_on_fail=False):
     result["flagged"], result["flag_reason"] = flag_result(result)
 
     if not result["parse_ok"] and dump_on_fail:
-        print("\n──── raw page text (parse failed — send this back) " + "─" * 20)
+        print("\n---- raw page text (parse failed - send this back) " + "-" * 20)
         print(page_text[:3000])
-        print("─" * 70)
+        print("-" * 70)
 
     return result
 
