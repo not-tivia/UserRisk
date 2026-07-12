@@ -67,14 +67,27 @@ raffle-dashboard/
 when the account last changed its username. A change within the last 30 days
 (or an account that no longer exists) gets flagged.
 
-One-time setup — X requires a logged-in session:
+One-time setup — X requires a logged-in session. Two ways:
+
+**A. Import an existing session (recommended — avoids X login rate limits):**
+
+```
+python twitter_check.py --import-cookies
+```
+
+In a browser already logged into X: F12 -> Application/Storage -> Cookies ->
+`https://x.com` -> copy the `auth_token` Value, paste it when prompted.
+
+**B. Log in fresh:**
 
 ```
 python twitter_check.py --login
 ```
 
-Log into X in the browser that opens, then close it. The session is saved to
-`data/chrome-profile/` and reused for all future (headless) checks.
+Log into X in the browser that opens, then close it.
+
+Either way the session is saved to `data/chrome-profile/` and reused for all
+future (headless) checks.
 
 Try it on a single handle:
 

@@ -347,6 +347,49 @@ def do_login():
     print("Browser closed. Login saved (if you completed it).")
 
 
+def do_import_cookies():
+    """
+    Skip the login flow entirely: copy the auth_token cookie from a browser
+    that is already logged into X, paste it here, and we inject it into the
+    tool's own profile. Avoids X's "temporarily limited your login" blocks.
+    """
+    print("In the browser where you are ALREADY logged into X:")
+    print("  1. Open x.com, press F12")
+    print("  2. Application tab (Chrome/Edge) or Storage tab (Firefox)")
+    print("  3. Cookies -> https://x.com -> find 'auth_token'")
+    print("  4. Copy its Value and paste it below")
+    print()
+    token = input("auth_token: ").strip().strip('"')
+    if not re.fullmatch(r"[0-9a-f]{20,}", token):
+        print("That doesn't look like an auth_token (expected a long hex string).")
+        sys.exit(1)
+
+    driver = create_driver(headless=True)
+    try:
+        # Must be on the domain before add_cookie will accept it
+        driver.get("https://x.com/404")
+        time.sleep(3)
+        driver.add_cookie({
+            "name": "auth_token",
+            "value": token,
+            "domain": ".x.com",
+            "path": "/",
+            "secure": True,
+        })
+        driver.get("https://x.com/home")
+        time.sleep(PAGE_LOAD_WAIT)
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        page_text = soup.get_text(" ", strip=True)
+        if _detect_login_wall(page_text):
+            print("\nStill seeing a login wall - the token may be wrong or expired.")
+            print("Double-check you copied the full auth_token Value.")
+            sys.exit(1)
+        print("\nLogged in! Session saved to data/chrome-profile.")
+        print("Try:  python twitter_check.py --test <handle>")
+    finally:
+        driver.quit()
+
+
 def do_test(handle):
     driver = create_driver(headless=True)
     try:
@@ -363,12 +406,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="X username-change checker")
     parser.add_argument("--login", action="store_true",
                         help="open a visible browser to log into X (one-time)")
+    parser.add_argument("--import-cookies", action="store_true",
+                        help="paste an auth_token from a browser already logged "
+                             "into X (skips the login wall / rate limits)")
     parser.add_argument("--test", metavar="HANDLE",
                         help="check a single handle and print the full result")
     args = parser.parse_args()
 
     if args.login:
         do_login()
+    elif args.import_cookies:
+        do_import_cookies()
     elif args.test:
         do_test(args.test)
     else:
