@@ -192,9 +192,11 @@ def parse_about_page(page_text, today=None):
         result["change_count"] = 0
         result["parse_ok"] = True
 
-    # "Last changed Jun 2026" / "most recently Jun 2026" / "... 3 days ago"
+    # Confirmed live 2026-09-25 (@TivSolana, 4 changes): X's real wording is
+    # "Last on Jun 2026", not "last changed"/"most recently" as first
+    # guessed. Kept the old guesses as fallback in case wording varies.
     m = re.search(
-        r"(?:last changed|most recently(?: changed)?(?: on)?)\s+"
+        r"(?:last on|last changed|most recently(?: changed)?(?: on)?)\s+"
         r"((?:[a-z]{3,9}\s+\d{1,2},?\s*\d{4})|(?:[a-z]{3,9}\s+\d{4})|(?:[^.]{1,30}?ago))",
         low,
     )
