@@ -159,17 +159,48 @@ deliberately biased toward under-flagging rather than over-flagging.
 
 ### Running every 12 hours on the Ubuntu server
 
-Unit files are in `deploy/`. Install Chrome (`sudo apt install chromium-browser`
-or Google Chrome), then:
+Unit files are in `deploy/`. Don't use `sudo apt install chromium-browser` —
+on modern Ubuntu that installs a *snap*, and snap's sandboxing regularly
+breaks headless Chrome under systemd/cron (permission errors reading its own
+profile dir, "$HOME not accessible", etc.). Install the real Google Chrome
+`.deb` instead:
+
+```
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt update && sudo apt install -y google-chrome-stable
+```
+
+Then:
 
 ```
 sudo mkdir -p /opt/raffle-dashboard
-sudo cp -r . /opt/raffle-dashboard      # or git clone the repo there
+sudo chown $USER /opt/raffle-dashboard
+cp -r . /opt/raffle-dashboard          # or git clone the repo there
 cd /opt/raffle-dashboard
 python3 -m venv venv && venv/bin/pip install -r requirements.txt
-echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' | sudo tee .env
-python venv/bin/python twitter_check.py --import-cookies   # one-time X login
+echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' > .env
+```
 
+For the X/twitter check: rather than re-doing the login on this machine, copy
+the already-authenticated burner account's session over from wherever you
+first ran `--login` (avoids re-doing the login flow, and cookies exported by
+`--import-cookies` are finicky — see the X Username-Change Checker section
+above):
+
+```
+# from your Windows machine (PowerShell), replace user@server:
+scp -r F:\raffle-dashboard\data\chrome-profile user@ubuntu-server:/opt/raffle-dashboard/data/
+```
+
+If you'd rather start fresh with a different account on this machine instead,
+run `venv/bin/python twitter_check.py --login` here (needs a desktop/X11
+session or a VNC tunnel, since it opens a real visible browser — headless
+`--import-cookies` also works but see the truncation gotcha noted above).
+
+Install the timer:
+
+```
 sudo cp deploy/raffle-report.service deploy/raffle-report.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now raffle-report.timer
