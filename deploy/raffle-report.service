@@ -1,0 +1,10 @@
+[Unit]
+Description=Raffle risk scan + Discord report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/raffle-dashboard
+EnvironmentFile=/opt/raffle-dashboard/.env
+ExecStart=/opt/raffle-dashboard/venv/bin/python discord_report.py

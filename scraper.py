@@ -41,6 +41,16 @@ NEAR_END_TIME_RISK = 35
 MULTI_RAFFLE_RISK = 10
 SPL_TOKEN_RISK_REDUCTION = 0.65
 SPL_TOKEN_THRESHOLD = 20
+NEW_WALLET_DAYS_THRESHOLD = 14   # wallet risk-flagged if its oldest known tx is newer than this
+NEW_WALLET_RISK = 25
+TWITTER_FLAG_RISK = 25           # added when twitter_check.py flags the linked X account
+
+# A user only counts as "max confidence" (ready to auto-flag) when the risk
+# score is at the top of the scale AND multiple independent signals agree —
+# tier/repeat pattern alone is not enough to auto-flag.
+MAX_CONFIDENCE_MIN_RISK = 90
+MAX_CONFIDENCE_MIN_SIGNALS = 2
+REVIEW_MIN_RISK = 40             # below this, don't bother surfacing in the daily report
 
 # Scraping
 MAX_SCROLL_ATTEMPTS = 10
@@ -184,17 +194,25 @@ def extract_card(card):
 
 
 # ─── Risk ─────────────────────────────────────────────────────────────────────
-def calc_risk(tier, user_name, existing, time_frame_hrs=3):
+def calc_risk(tier, user_name, existing, wallet_age_days=None, time_frame_hrs=3):
+    """Returns (risk, signals) — signals is a set of independent risk-factor
+    names, used later to gate auto-flagging on more than just raw score."""
     risk = TIER_RISK.get(tier, 0)
+    signals = set()
     for r in existing:
         if r.get("user_name") != user_name:
             continue
         hrs = convert_to_hours(r.get("end_time_text", ""))
         if hrs <= 1:
             risk += NEAR_END_TIME_RISK
+            signals.add("repeat_pattern")
         if hrs <= time_frame_hrs:
             risk += MULTI_RAFFLE_RISK
-    return min(risk, 100)
+            signals.add("repeat_pattern")
+    if wallet_age_days is not None and wallet_age_days <= NEW_WALLET_DAYS_THRESHOLD:
+        risk += NEW_WALLET_RISK
+        signals.add("new_wallet")
+    return min(risk, 100), signals
 
 
 # ─── Token lookup (via Solana RPC — free, no API key) ─────────────────────────
@@ -234,6 +252,53 @@ def get_spl_tokens(wallet):
     return 0
 
 
+def get_wallet_age_days(wallet):
+    """
+    Estimate wallet age from its oldest known transaction signature.
+    getSignaturesForAddress returns newest-first; a single 1000-signature page
+    covers the full history of any genuinely new wallet, so if the page comes
+    back full we already know the wallet predates our lookup window and can
+    skip further (expensive) pagination — we just report it as not-new.
+    Returns None if we can't determine an age (skips the new-wallet signal).
+    """
+    rpc_urls = [
+        "https://api.mainnet-beta.solana.com",
+        "https://rpc.ankr.com/solana",
+    ]
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [wallet, {"limit": 1000}],
+    }
+
+    for rpc_url in rpc_urls:
+        try:
+            resp = requests.post(rpc_url, json=payload, timeout=15)
+            data = resp.json()
+            sigs = data.get("result")
+            if sigs is None:
+                continue
+            if not sigs:
+                logging.info(f"Wallet {wallet[:8]}... has no on-chain history — treating as new.")
+                return 0
+            if len(sigs) >= 1000:
+                logging.info(f"Wallet {wallet[:8]}... has >1000 signatures — not new.")
+                return None
+            block_time = sigs[-1].get("blockTime")
+            if not block_time:
+                return None
+            age_days = max((datetime.now() - datetime.fromtimestamp(block_time)).days, 0)
+            logging.info(f"Wallet {wallet[:8]}... age ~{age_days}d")
+            return age_days
+        except Exception as e:
+            logging.error(f"Signature RPC error ({rpc_url}): {e}")
+            continue
+
+    logging.warning(f"All RPC endpoints failed for wallet age of {wallet[:8]}...")
+    return None
+
+
 # ─── Combine duplicates ──────────────────────────────────────────────────────
 def combine(data_list):
     combined = {}
@@ -244,11 +309,48 @@ def combine(data_list):
             c["raffle_count"] += 1
             c["risk"] = max(c.get("risk", 0), d.get("risk", 0))
             c["spl_token_count"] = max(c.get("spl_token_count", 0), d.get("spl_token_count", 0))
+            c["signals"] = sorted(set(c.get("signals", [])) | set(d.get("signals", [])))
         else:
             entry = copy.deepcopy(d)
             entry["raffle_count"] = 1
             combined[name] = entry
     return list(combined.values())
+
+
+def classify_confidence(risk, signals):
+    if risk >= MAX_CONFIDENCE_MIN_RISK and len(signals) >= MAX_CONFIDENCE_MIN_SIGNALS:
+        return "max"
+    if risk >= REVIEW_MIN_RISK:
+        return "review"
+    return "low"
+
+
+def apply_twitter_signal(results):
+    """
+    Run twitter_check.py's check_handles() against every combined user and
+    fold a flagged (renamed/dead) X account into risk + signals. Best-effort:
+    any failure (not logged into X, network error, etc.) just skips this
+    signal for the run rather than failing the whole scrape.
+    """
+    if not results:
+        return results
+    try:
+        from twitter_check import check_handles
+        tw_results = check_handles([r["user_name"] for r in results])
+    except Exception as e:
+        logging.error(f"Twitter check unavailable this run: {e}")
+        return results
+
+    for r in results:
+        tw = tw_results.get(r["user_name"].lstrip("@"))
+        r["twitter_flag_reason"] = None
+        if tw and tw.get("flagged"):
+            r["risk"] = min(r.get("risk", 0) + TWITTER_FLAG_RISK, 100)
+            signals = set(r.get("signals", []))
+            signals.add("twitter_flag")
+            r["signals"] = sorted(signals)
+            r["twitter_flag_reason"] = tw.get("flag_reason")
+    return results
 
 
 # ─── Main scrape ──────────────────────────────────────────────────────────────
@@ -264,7 +366,7 @@ def run_scrape():
         logging.info("Page loaded.")
 
         skip = set()
-        seen_wallets = set()
+        wallet_info = {}   # wallet -> {"spl": int, "wallet_age_days": int|None}, looked up once per wallet
 
         if not scroll_page(driver, MAX_SCROLL_ATTEMPTS, MIN_END_TIME_HOURS):
             logging.info("No raffles found after scrolling.")
@@ -303,19 +405,27 @@ def run_scrape():
             logging.info(f"  -> MATCH: {data['user_name']} is {data['tier_badge']}")
 
             wallet = data["user_link"].split("/")[-1]
-            if wallet and wallet not in seen_wallets:
-                spl = get_spl_tokens(wallet)
-                seen_wallets.add(wallet)
+            if wallet:
+                if wallet not in wallet_info:
+                    wallet_info[wallet] = {
+                        "spl": get_spl_tokens(wallet),
+                        "wallet_age_days": get_wallet_age_days(wallet),
+                    }
+                spl = wallet_info[wallet]["spl"]
+                wallet_age_days = wallet_info[wallet]["wallet_age_days"]
             else:
                 spl = 0
+                wallet_age_days = None
 
-            risk = calc_risk(data["tier_badge"], data["user_name"], results)
+            risk, signals = calc_risk(data["tier_badge"], data["user_name"], results, wallet_age_days)
             if spl > SPL_TOKEN_THRESHOLD:
                 risk = int(risk * SPL_TOKEN_RISK_REDUCTION)
 
             results.append({
                 "risk": risk,
+                "signals": sorted(signals),
                 "spl_token_count": spl,
+                "wallet_age_days": wallet_age_days,
                 "user_name": data["user_name"],
                 "tier_badge": data["tier_badge"],
                 "end_time": data["end_time_text"],
@@ -327,6 +437,9 @@ def run_scrape():
             })
 
         results = combine(results)
+        results = apply_twitter_signal(results)
+        for r in results:
+            r["confidence"] = classify_confidence(r["risk"], r.get("signals", []))
         results.sort(key=lambda x: (x["risk"], -x["spl_token_count"], x["end_time_seconds"]), reverse=True)
 
     except (TimeoutException, WebDriverException) as e:

@@ -337,6 +337,30 @@
     color: var(--accent-lime);
     background: rgba(132, 204, 22, 0.1);
   }
+  .btn-flag.ready {
+    border-color: var(--accent-lime);
+    background: rgba(132, 204, 22, 0.18);
+    color: var(--accent-lime);
+  }
+
+  /* Signal chips */
+  .signal-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; max-width: 220px; }
+  .signal-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    background: var(--bg-surface);
+  }
+  .signal-chip.new_wallet { border-color: rgba(234, 179, 8, 0.4); color: #fde047; background: rgba(234, 179, 8, 0.1); }
+  .signal-chip.twitter_flag { border-color: rgba(56, 189, 248, 0.4); color: #7dd3fc; background: rgba(56, 189, 248, 0.1); }
+  .signal-chip.repeat_pattern { border-color: rgba(249, 115, 22, 0.4); color: #fdba74; background: rgba(249, 115, 22, 0.1); }
+  .signal-chip.max-confidence { border-color: var(--accent-lime); color: var(--accent-lime); background: rgba(132, 204, 22, 0.15); }
 
   /* Toast notification */
   .toast {
@@ -414,6 +438,10 @@
     <span class="value red" id="statCrit">—</span>
   </div>
   <div class="stat-cell">
+    <span class="label">Ready To Flag</span>
+    <span class="value lime" id="statMax">—</span>
+  </div>
+  <div class="stat-cell">
     <span class="label">T1 Creators</span>
     <span class="value orange" id="statT1">—</span>
   </div>
@@ -428,6 +456,7 @@
   <button class="filter-btn" onclick="setFilter('T1', this)">T1 Only</button>
   <button class="filter-btn" onclick="setFilter('T2', this)">T2 Only</button>
   <button class="filter-btn" onclick="setFilter('crit', this)">Critical (70+)</button>
+  <button class="filter-btn" onclick="setFilter('max', this)">Ready To Flag</button>
   <span class="sort-label">Sort by</span>
   <select class="sort-select" id="sortSelect" onchange="renderTable()">
     <option value="risk">Risk ↓</option>
@@ -448,6 +477,7 @@
         <th>End Time</th>
         <th>SPL Tokens</th>
         <th>Live Raffles</th>
+        <th>Signals</th>
         <th></th>
       </tr>
     </thead>
@@ -464,8 +494,8 @@
 let allData = [];
 let currentFilter = 'all';
 
-function flagUser(btn, profileUrl) {
-  const cmd = `!flag ${profileUrl}`;
+function flagUser(btn, wallet) {
+  const cmd = `!flag ${wallet}`;
   navigator.clipboard.writeText(cmd).then(() => {
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
@@ -482,6 +512,27 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+const SIGNAL_LABELS = {
+  repeat_pattern: { text: 'REPEAT', title: 'Multiple T1/T2 raffles ending in a tight window' },
+  new_wallet: { text: 'NEW WALLET', title: 'Wallet’s oldest known transaction is very recent' },
+  twitter_flag: { text: 'X FLAG', title: 'Linked X account' },
+};
+
+function signalChips(r) {
+  const signals = r.signals || [];
+  let chips = signals.map(s => {
+    const meta = SIGNAL_LABELS[s] || { text: s, title: '' };
+    let title = meta.title;
+    if (s === 'new_wallet' && r.wallet_age_days != null) title += ` (~${r.wallet_age_days}d old)`;
+    if (s === 'twitter_flag' && r.twitter_flag_reason) title += `: ${r.twitter_flag_reason}`;
+    return `<span class="signal-chip ${s}" title="${title.replace(/"/g, '&quot;')}">${meta.text}</span>`;
+  }).join('');
+  if (r.confidence === 'max') {
+    chips += `<span class="signal-chip max-confidence" title="High score + 2+ independent signals — ready to flag">MAX</span>`;
+  }
+  return chips || '<span class="mono" style="color:var(--text-dim)">—</span>';
 }
 
 function riskColor(risk) {
@@ -503,6 +554,7 @@ function getFiltered() {
   if (currentFilter === 'T1') data = data.filter(r => r.tier_badge === 'T1');
   else if (currentFilter === 'T2') data = data.filter(r => r.tier_badge === 'T2');
   else if (currentFilter === 'crit') data = data.filter(r => r.risk >= 70);
+  else if (currentFilter === 'max') data = data.filter(r => r.confidence === 'max');
 
   const sort = document.getElementById('sortSelect').value;
   if (sort === 'risk') data.sort((a, b) => b.risk - a.risk);
@@ -555,7 +607,8 @@ function renderTable() {
       <td><span class="end-time">${r.end_time || '—'}</span></td>
       <td class="mono">${r.spl_token_count ?? '—'}</td>
       <td class="mono">${r.raffle_count ?? '—'}</td>
-      <td><button class="btn-flag" onclick="flagUser(this, '${r.user_link}')">Flag</button></td>
+      <td><div class="signal-chips">${signalChips(r)}</div></td>
+      <td><button class="btn-flag ${r.confidence === 'max' ? 'ready' : ''}" onclick="flagUser(this, '${wallet}')">${r.confidence === 'max' ? 'Flag ✓' : 'Flag'}</button></td>
     </tr>`;
   }).join('');
 }
@@ -563,6 +616,7 @@ function renderTable() {
 function updateStats() {
   document.getElementById('statTotal').textContent = allData.length;
   document.getElementById('statCrit').textContent = allData.filter(r => r.risk >= 70).length;
+  document.getElementById('statMax').textContent = allData.filter(r => r.confidence === 'max').length;
   document.getElementById('statT1').textContent = allData.filter(r => r.tier_badge === 'T1').length;
   document.getElementById('statT2').textContent = allData.filter(r => r.tier_badge === 'T2').length;
 }

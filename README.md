@@ -111,6 +111,74 @@ All risk weights are constants at the top of `scraper.py`:
 | `MULTI_RAFFLE_RISK` | 10 | Added per raffle within the time window |
 | `SPL_TOKEN_THRESHOLD` | 20 | Token count above which risk is reduced |
 | `SPL_TOKEN_RISK_REDUCTION` | 0.65 | Multiplier applied when tokens > threshold |
+| `NEW_WALLET_DAYS_THRESHOLD` | 14 | Wallet flagged "new" if its oldest known tx is more recent than this |
+| `NEW_WALLET_RISK` | 25 | Added when the wallet is flagged new |
+| `TWITTER_FLAG_RISK` | 25 | Added when `twitter_check.py` flags the linked X account (renamed/deleted) |
+| `MAX_CONFIDENCE_MIN_RISK` | 90 | Risk floor for "ready to flag" |
+| `MAX_CONFIDENCE_MIN_SIGNALS` | 2 | Independent signals required alongside the risk floor |
+| `REVIEW_MIN_RISK` | 40 | Below this, a user doesn't show up in the daily report (still visible in the dashboard) |
+
+### Why "ready to flag" requires 2+ signals
+
+The tier + repeat-raffle pattern alone can hit risk 100 on its own (see
+`calc_risk`), but it's just a timing pattern — not proof of a bot. `"max"`
+confidence (the only tier the automation calls out as ready to ban) requires
+the score to be at the ceiling **and** at least one other independent
+signal — a wallet that's only days old, or an X account that just changed
+its handle or disappeared. Anything else lands in the "review" bucket
+instead of "ready to flag": a heuristic score is not proof of fraud, and a
+wrongful ban is a real support/reputation cost, so the automation is
+deliberately biased toward under-flagging rather than over-flagging.
+
+## Automated Reports (Discord)
+
+`discord_report.py` runs a full scrape (tier/repeat pattern + SPL token count
++ wallet age + X account check), then posts two sections to a Discord webhook:
+
+- **READY TO FLAG** — `confidence == "max"` entries, each with a ready-to-paste
+  `!flag <wallet>` command. This does **not** call Discord's bot or ban
+  anything itself — it only prepares the command for you to paste, same as
+  the dashboard's "Flag" button.
+- **REVIEW** — everything else above `REVIEW_MIN_RISK`, for a human look.
+
+### One-time setup
+
+1. Create a Discord webhook for the channel you want reports in
+   (Channel Settings → Integrations → Webhooks → New Webhook), copy its URL.
+2. On the machine that will run it, set `DISCORD_WEBHOOK_URL` — don't hardcode
+   it or commit it anywhere:
+   ```
+   echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' > .env
+   ```
+3. Test it manually first: `python discord_report.py` (needs Chrome/chromedriver
+   available, same as the scraper — Selenium auto-downloads the driver).
+4. If X/twitter checks haven't been set up on this machine yet, run
+   `python twitter_check.py --import-cookies` once (headless-safe, no browser
+   window needed) so `data/chrome-profile/` has a logged-in session.
+
+### Running every 12 hours on the Ubuntu server
+
+Unit files are in `deploy/`. Install Chrome (`sudo apt install chromium-browser`
+or Google Chrome), then:
+
+```
+sudo mkdir -p /opt/raffle-dashboard
+sudo cp -r . /opt/raffle-dashboard      # or git clone the repo there
+cd /opt/raffle-dashboard
+python3 -m venv venv && venv/bin/pip install -r requirements.txt
+echo 'DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...' | sudo tee .env
+python venv/bin/python twitter_check.py --import-cookies   # one-time X login
+
+sudo cp deploy/raffle-report.service deploy/raffle-report.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now raffle-report.timer
+sudo systemctl start raffle-report.service   # run once immediately to verify
+journalctl -u raffle-report.service -f       # watch it run
+```
+
+The timer fires at 00:00 and 12:00 server time (`deploy/raffle-report.timer`
+`OnCalendar`), with a random up-to-5-minute delay to avoid hammering the site
+at the exact same second every run.
 
 ## CSS Selectors
 
