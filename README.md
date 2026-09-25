@@ -114,6 +114,7 @@ All risk weights are constants at the top of `scraper.py`:
 | `NEW_WALLET_DAYS_THRESHOLD` | 14 | Wallet flagged "new" if its oldest known tx is more recent than this |
 | `NEW_WALLET_RISK` | 25 | Added when the wallet is flagged new |
 | `TWITTER_FLAG_RISK` | 25 | Added when `twitter_check.py` flags the linked X account (renamed/deleted) |
+| `NO_X_LINKED_RISK` | 20 | Added when there's no linked X account at all (display name isn't handle-shaped) — legit creators link one immediately |
 | `MAX_CONFIDENCE_MIN_RISK` | 90 | Risk floor for "ready to flag" |
 | `MAX_CONFIDENCE_MIN_SIGNALS` | 2 | Independent signals required alongside the risk floor |
 | `REVIEW_MIN_RISK` | 40 | Below this, a user doesn't show up in the daily report (still visible in the dashboard) |

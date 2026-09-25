@@ -359,6 +359,7 @@
   }
   .signal-chip.new_wallet { border-color: rgba(234, 179, 8, 0.4); color: #fde047; background: rgba(234, 179, 8, 0.1); }
   .signal-chip.twitter_flag { border-color: rgba(56, 189, 248, 0.4); color: #7dd3fc; background: rgba(56, 189, 248, 0.1); }
+  .signal-chip.no_x_linked { border-color: rgba(168, 85, 247, 0.4); color: #d8b4fe; background: rgba(168, 85, 247, 0.1); }
   .signal-chip.repeat_pattern { border-color: rgba(249, 115, 22, 0.4); color: #fdba74; background: rgba(249, 115, 22, 0.1); }
   .signal-chip.max-confidence { border-color: var(--accent-lime); color: var(--accent-lime); background: rgba(132, 204, 22, 0.15); }
 
@@ -518,6 +519,7 @@ const SIGNAL_LABELS = {
   repeat_pattern: { text: 'REPEAT', title: 'Multiple T1/T2 raffles ending in a tight window' },
   new_wallet: { text: 'NEW WALLET', title: 'Wallet’s oldest known transaction is very recent' },
   twitter_flag: { text: 'X FLAG', title: 'Linked X account' },
+  no_x_linked: { text: 'NO X LINKED', title: 'No X account linked — legit creators usually link one right away' },
 };
 
 function signalChips(r) {

@@ -44,6 +44,7 @@ SPL_TOKEN_THRESHOLD = 20
 NEW_WALLET_DAYS_THRESHOLD = 14   # wallet risk-flagged if its oldest known tx is newer than this
 NEW_WALLET_RISK = 25
 TWITTER_FLAG_RISK = 25           # added when twitter_check.py flags the linked X account
+NO_X_LINKED_RISK = 20            # no X account linked at all — legit creators link one immediately
 
 # A user only counts as "max confidence" (ready to auto-flag) when the risk
 # score is at the top of the scale AND multiple independent signals agree —
@@ -327,30 +328,40 @@ def classify_confidence(risk, signals):
 
 # Real X handles are letters/digits/underscore only, max 15 chars. Confirmed
 # live 2026-09-25: the raffle site falls back to showing a truncated wallet
-# address (e.g. "6pGW...4pAF") as the display name for users who haven't set
-# one — checking that against x.com always "resolves" as a nonexistent
-# account, which isn't a real signal, just a false "account gone" flag. Skip
-# anything that isn't shaped like a real handle instead of misreporting it.
+# address (e.g. "6pGW...4pAF") as the display name for users who haven't
+# linked an X account — checking that string against x.com always "resolves"
+# as a nonexistent account, which isn't a real per-user signal. But per chris
+# (2026-09-25): legitimate raffle creators link X right away, so having no
+# linked account at all is itself a risk signal — see NO_X_LINKED_RISK below,
+# not a skip.
 VALID_X_HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
 def apply_twitter_signal(results):
     """
-    Run twitter_check.py's check_handles() against every combined user and
-    fold a flagged (renamed/dead) X account into risk + signals. Best-effort:
-    any failure (not logged into X, network error, etc.) just skips this
-    signal for the run rather than failing the whole scrape.
+    For users with no linked X account (display name isn't handle-shaped),
+    add NO_X_LINKED_RISK directly — no point checking a name that was never a
+    real handle. For everyone else, run twitter_check.py's check_handles()
+    and fold a flagged (renamed/dead) X account into risk + signals.
+    Best-effort: any check_handles failure (not logged into X, network error,
+    etc.) just skips that part of the signal for the run rather than failing
+    the whole scrape.
     """
     if not results:
         return results
 
-    checkable = [r["user_name"] for r in results if VALID_X_HANDLE.match(r["user_name"])]
-    skipped = len(results) - len(checkable)
-    if skipped:
-        logging.info(f"Skipping twitter check for {skipped} user(s) with non-handle display names.")
+    checkable = []
+    for r in results:
+        r["twitter_flag_reason"] = None
+        if VALID_X_HANDLE.match(r["user_name"]):
+            checkable.append(r["user_name"])
+        else:
+            r["risk"] = min(r.get("risk", 0) + NO_X_LINKED_RISK, 100)
+            signals = set(r.get("signals", []))
+            signals.add("no_x_linked")
+            r["signals"] = sorted(signals)
+
     if not checkable:
-        for r in results:
-            r["twitter_flag_reason"] = None
         return results
 
     try:
@@ -358,12 +369,9 @@ def apply_twitter_signal(results):
         tw_results = check_handles(checkable)
     except Exception as e:
         logging.error(f"Twitter check unavailable this run: {e}")
-        for r in results:
-            r["twitter_flag_reason"] = None
         return results
 
     for r in results:
-        r["twitter_flag_reason"] = None
         if not VALID_X_HANDLE.match(r["user_name"]):
             continue
         tw = tw_results.get(r["user_name"].lstrip("@"))
