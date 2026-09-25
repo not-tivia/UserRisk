@@ -159,7 +159,10 @@ def parse_about_page(page_text, today=None):
         "parse_ok": False,
     }
 
-    if "this account doesn" in low and "exist" in low:
+    # X's real 2026 "account doesn't exist" wording is "this page doesn't
+    # exist" ("this account doesn..." never actually appears — confirmed live
+    # 2026-09-25 against a made-up handle).
+    if "page not found" in low or ("this page doesn" in low and "exist" in low):
         result["exists"] = False
         result["parse_ok"] = True
         return result
@@ -171,6 +174,7 @@ def parse_about_page(page_text, today=None):
     m = re.search(r"joined\s+([a-z]{3,9}\s+\d{4})", low)
     if m:
         result["joined"] = m.group(1).title()
+        result["parse_ok"] = True  # a real profile page loaded
 
     # "Username changes: 3" / "3 username changes" / "changed their username 3 times"
     m = (
@@ -182,7 +186,8 @@ def parse_about_page(page_text, today=None):
         result["change_count"] = int(m.group(1))
         result["parse_ok"] = True
 
-    # "No username changes" / "hasn't changed their username"
+    # "No username changes" / "hasn't changed their username" — rarely seen;
+    # X usually just omits the whole section instead (see below).
     if re.search(r"no username changes|not changed (?:their|its) username|never changed", low):
         result["change_count"] = 0
         result["parse_ok"] = True
@@ -197,6 +202,18 @@ def parse_about_page(page_text, today=None):
         result["last_change_text"] = m.group(1).strip().title()
         result["days_since_change"] = days_since_change(m.group(1), today)
         result["parse_ok"] = True
+
+    # Confirmed live 2026-09-25 (@jack, never renamed): X's "About this
+    # account" panel OMITS the username-change line entirely when the count
+    # is zero, rather than printing "no username changes" as originally
+    # assumed. So a real profile page with no change line found means zero
+    # changes, not a parse failure — this is the one part of this file that's
+    # inferred from a single confirmed sample + X's own feature docs, not
+    # directly observed on an account that HAS changed its handle. If this
+    # ever misfires (change_count wrongly stays 0 for an account that clearly
+    # renamed), that regex above needs a second look against a real sample.
+    if result["joined"] and result["change_count"] is None:
+        result["change_count"] = 0
 
     return result
 
@@ -215,17 +232,33 @@ def flag_result(result):
 
 # ─── Checking ─────────────────────────────────────────────────────────────────
 def _detect_login_wall(page_text):
+    """
+    Confirmed live 2026-09-25: a logged-out request to /<handle>/about now
+    gets a hard edge-level block ("Access to x.com was denied", HTTP 403),
+    not X's old "Sign in to X" prompt page — those old wall_phrases are kept
+    as a fallback in case that prompt still shows up in some other flow, but
+    the 403 block is the one actually observed.
+
+    "javascript is not available" was DROPPED from this list — it's static
+    noscript boilerplate present on every X page load regardless of login
+    state (real profile pages, "page not found" pages, everything), so it
+    was producing false positives on any handle that doesn't resolve to a
+    real profile (e.g. "page not found" has no "joined" text to save it via
+    the old guard, so it always misfired as "not logged in").
+    """
     low = re.sub(r"\s+", " ", page_text).lower()
     wall_phrases = (
+        "access to x.com was denied",
+        "you don't have authorization",
+        "http error 403",
         "sign in to x",
         "log in to x",
         "continue with apple",
         "continue with phone",
         "email or username",
         "see what's happening",
-        "javascript is not available",
     )
-    return any(p in low for p in wall_phrases) and "joined" not in low
+    return any(p in low for p in wall_phrases)
 
 
 def check_handle(driver, handle, dump_on_fail=False):
@@ -336,14 +369,23 @@ def do_login():
     print("Opening a visible browser. Log into X, then close the window.")
     print("(Your session is saved to data/chrome-profile and reused from then on.)")
     driver = create_driver(headless=False)
-    driver.get("https://x.com/login")
     try:
+        driver.get("https://x.com/login")
         # Wait until the user closes the window
         while True:
             time.sleep(2)
             _ = driver.window_handles
     except Exception:
         pass
+    finally:
+        # Without this, chromedriver.exe/chrome.exe keep running after the
+        # window is closed and hold a lock on data/chrome-profile, making the
+        # next --test/--import-cookies fail with "Chrome failed to start:
+        # crashed" (DevToolsActivePort). Confirmed live 2026-09-25.
+        try:
+            driver.quit()
+        except Exception:
+            pass
     print("Browser closed. Login saved (if you completed it).")
 
 

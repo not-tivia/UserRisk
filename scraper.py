@@ -325,6 +325,15 @@ def classify_confidence(risk, signals):
     return "low"
 
 
+# Real X handles are letters/digits/underscore only, max 15 chars. Confirmed
+# live 2026-09-25: the raffle site falls back to showing a truncated wallet
+# address (e.g. "6pGW...4pAF") as the display name for users who haven't set
+# one — checking that against x.com always "resolves" as a nonexistent
+# account, which isn't a real signal, just a false "account gone" flag. Skip
+# anything that isn't shaped like a real handle instead of misreporting it.
+VALID_X_HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+
+
 def apply_twitter_signal(results):
     """
     Run twitter_check.py's check_handles() against every combined user and
@@ -334,16 +343,30 @@ def apply_twitter_signal(results):
     """
     if not results:
         return results
+
+    checkable = [r["user_name"] for r in results if VALID_X_HANDLE.match(r["user_name"])]
+    skipped = len(results) - len(checkable)
+    if skipped:
+        logging.info(f"Skipping twitter check for {skipped} user(s) with non-handle display names.")
+    if not checkable:
+        for r in results:
+            r["twitter_flag_reason"] = None
+        return results
+
     try:
         from twitter_check import check_handles
-        tw_results = check_handles([r["user_name"] for r in results])
+        tw_results = check_handles(checkable)
     except Exception as e:
         logging.error(f"Twitter check unavailable this run: {e}")
+        for r in results:
+            r["twitter_flag_reason"] = None
         return results
 
     for r in results:
-        tw = tw_results.get(r["user_name"].lstrip("@"))
         r["twitter_flag_reason"] = None
+        if not VALID_X_HANDLE.match(r["user_name"]):
+            continue
+        tw = tw_results.get(r["user_name"].lstrip("@"))
         if tw and tw.get("flagged"):
             r["risk"] = min(r.get("risk", 0) + TWITTER_FLAG_RISK, 100)
             signals = set(r.get("signals", []))
