@@ -1,25 +1,36 @@
 """
 Daily/twice-daily automation entry point: runs a full scrape (tier + repeat
 pattern + SPL token count + wallet age + X/twitter check), then posts a
-formatted embed report to a Discord webhook with two sections:
+formatted report to a Discord webhook:
 
-  READY TO FLAG — "max confidence" entries (top risk score AND 2+ independent
-                  signals), red sidebar, each with a ready-to-paste
-                  `!flag <wallet>` code block — still requires you to paste
-                  it, nothing bans automatically.
-  REVIEW        — everything else above REVIEW_MIN_RISK, yellow sidebar.
+  1. One summary message.
+  2. One message PER "max confidence" (ready to flag) account — its own
+     embed (bulleted signals, a ready-to-paste `!flag <wallet>` code block)
+     plus a row of real clickable link buttons (View Profile, Solscan).
+     Discord attaches buttons to the whole message, not a specific embed, so
+     these are sent one-per-message rather than bundled together.
+  3. One compact multi-field message for everything else above
+     REVIEW_MIN_RISK, no buttons (nothing actionable there yet).
+
+Buttons are LINK-style only — Discord has no "copy to clipboard" button type
+for any bot, and a button that actually executes the ban would need a real
+Discord Application (bot token + hosted interactions endpoint), not just a
+webhook. The code-block already gives one-click copy via Discord's own
+hover-to-copy affordance.
 
 Run manually:      python discord_report.py
 Run on a schedule:  see raffle-report.service / raffle-report.timer
 
-Requires the DISCORD_WEBHOOK_URL environment variable. Never hardcode the
-webhook URL in this file or commit it — it grants post access to the channel.
+Requires the DISCORD_WEBHOOK_URL environment variable (loaded from a local
+.env if present — see _load_dotenv below). Never hardcode the webhook URL in
+this file or commit it — it grants post access to the channel.
 """
 
 import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,40 +66,36 @@ _load_dotenv()
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# Discord hard limits: 25 fields/embed, 10 embeds/message, 1024 chars/field value.
+# Discord hard limits: 25 fields/embed, 5 buttons/action row, 5 rows/message.
 MAX_FIELDS_PER_EMBED = 25
-MAX_EMBEDS_PER_MESSAGE = 10
-MAX_FIELD_VALUE = 1000
+POST_DELAY_SECONDS = 0.4  # be polite when sending several messages in a row
 
 COLOR_HEADER = 0x8B5CF6  # purple, matches the dashboard's accent
 COLOR_MAX = 0xEF4444     # red
 COLOR_REVIEW = 0xEAB308  # yellow
 COLOR_CLEAN = 0x22C55E   # green, nothing flagged this run
 
-SIGNAL_LABELS = {
-    "repeat_pattern": "repeat pattern",
-    "new_wallet": "new wallet",
-    "twitter_flag": "X flag",
-    "no_x_linked": "no X linked",
+BUTTON_STYLE_LINK = 5
+ACTION_ROW = 1
+BUTTON = 2
+
+# One bullet-line builder per signal, in the order they should display.
+SIGNAL_BULLETS = {
+    "new_wallet": lambda r: (
+        f"New wallet — first transaction ~{r['wallet_age_days']}d ago"
+        if r.get("wallet_age_days") is not None else "New wallet"
+    ),
+    "repeat_pattern": lambda r: f"Repeat pattern — {r.get('raffle_count', '?')} T1/T2 raffles in a tight window",
+    "no_x_linked": lambda r: "No X account linked",
+    "twitter_flag": lambda r: f"X account flagged — {r.get('twitter_flag_reason') or 'renamed/deleted'}",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 
 
-def _reasons(r):
-    labels = [SIGNAL_LABELS.get(s, s) for s in r.get("signals", [])]
-    return ", ".join(labels) or "tier"
-
-
-def _field_for(r, ready_to_paste):
-    value = f"Risk **{r['risk']}** — {_reasons(r)}\n[Profile]({r['user_link']})"
-    if ready_to_paste:
-        value += f"\n```\n!flag {r['wallet']}\n```"
-    return {
-        "name": f"@{r['user_name']} ({r['tier_badge']})"[:256],
-        "value": value[:MAX_FIELD_VALUE],
-        "inline": False,
-    }
+def _signal_bullets(r):
+    lines = [SIGNAL_BULLETS[s](r) for s in r.get("signals", []) if s in SIGNAL_BULLETS]
+    return "\n".join(f"• {line}" for line in lines) or "• Tier only"
 
 
 def _chunk(items, size):
@@ -96,11 +103,8 @@ def _chunk(items, size):
         yield items[i:i + size]
 
 
-def build_embeds(results):
-    max_conf = [r for r in results if r.get("confidence") == "max"]
-    review = [r for r in results if r.get("confidence") == "review"]
-
-    embeds = [{
+def build_header(results, max_conf, review):
+    return {"embeds": [{
         "title": "Raffle Risk Scan",
         "description": (
             f"**{len(results)}** T1/T2 creators scanned — "
@@ -109,39 +113,68 @@ def build_embeds(results):
         "color": COLOR_CLEAN if not max_conf and not review else COLOR_HEADER,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "footer": {"text": "rafffle.famousfoxes.com risk scanner"},
+    }]}
+
+
+def build_max_message(r):
+    solscan = f"https://solscan.io/account/{r['wallet']}"
+    embed = {
+        "title": f"@{r['user_name']} — {r['tier_badge']} — Risk {r['risk']}",
+        "description": (
+            f"{_signal_bullets(r)}\n\n"
+            f"SPL tokens: **{r.get('spl_token_count', '?')}**\n"
+            f"Collection: {r.get('collection_name') or '—'}\n\n"
+            f"```\n!flag {r['wallet']}\n```"
+        ),
+        "color": COLOR_MAX,
+        "footer": {"text": "Confidence: MAX — ready to flag"},
+    }
+    components = [{
+        "type": ACTION_ROW,
+        "components": [
+            {"type": BUTTON, "style": BUTTON_STYLE_LINK, "label": "View Profile", "url": r["user_link"]},
+            {"type": BUTTON, "style": BUTTON_STYLE_LINK, "label": "Solscan", "url": solscan},
+        ],
     }]
-
-    for chunk in _chunk(max_conf, MAX_FIELDS_PER_EMBED):
-        embeds.append({
-            "title": f"\U0001F534 Ready To Flag ({len(max_conf)})",
-            "color": COLOR_MAX,
-            "fields": [_field_for(r, ready_to_paste=True) for r in chunk],
-        })
-
-    for chunk in _chunk(review, MAX_FIELDS_PER_EMBED):
-        embeds.append({
-            "title": f"\U0001F7E1 Review ({len(review)})",
-            "color": COLOR_REVIEW,
-            "fields": [_field_for(r, ready_to_paste=False) for r in chunk],
-        })
-
-    return embeds
+    return {"embeds": [embed], "components": components}
 
 
-def post_embeds(embeds):
+def build_review_message(chunk, total_review):
+    fields = [{
+        "name": f"@{r['user_name']} ({r['tier_badge']})"[:256],
+        "value": (f"Risk **{r['risk']}**\n{_signal_bullets(r)}\n[Profile]({r['user_link']})")[:1000],
+        "inline": False,
+    } for r in chunk]
+    return {"embeds": [{
+        "title": f"\U0001F7E1 Review ({total_review})",
+        "color": COLOR_REVIEW,
+        "fields": fields,
+    }]}
+
+
+def post(payload):
     if not DISCORD_WEBHOOK_URL:
-        logging.error("DISCORD_WEBHOOK_URL not set — printing report instead of posting.")
-        print(json.dumps(embeds, indent=2))
+        logging.error("DISCORD_WEBHOOK_URL not set — printing message instead of posting.")
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
         return
-    for chunk in _chunk(embeds, MAX_EMBEDS_PER_MESSAGE):
-        resp = requests.post(DISCORD_WEBHOOK_URL, json={"embeds": chunk}, timeout=15)
-        if resp.status_code >= 300:
-            logging.error(f"Discord post failed ({resp.status_code}): {resp.text[:300]}")
+    resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+    if resp.status_code >= 300:
+        logging.error(f"Discord post failed ({resp.status_code}): {resp.text[:300]}")
+    time.sleep(POST_DELAY_SECONDS)
 
 
 def main():
     results = run_scrape()
-    post_embeds(build_embeds(results))
+    max_conf = [r for r in results if r.get("confidence") == "max"]
+    review = [r for r in results if r.get("confidence") == "review"]
+
+    post(build_header(results, max_conf, review))
+
+    for r in max_conf:
+        post(build_max_message(r))
+
+    for chunk in _chunk(review, MAX_FIELDS_PER_EMBED):
+        post(build_review_message(chunk, len(review)))
 
 
 if __name__ == "__main__":
