@@ -21,6 +21,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Windows consoles often default to cp1252, which chokes on the emoji in
 # embed titles below. Never let printing crash the report.
@@ -33,6 +34,24 @@ for _stream in (sys.stdout, sys.stderr):
 import requests
 
 from scraper import run_scrape
+
+
+def _load_dotenv(path=".env"):
+    """Minimal .env loader so manual runs work the same way the systemd
+    EnvironmentFile= deploy does, without adding a python-dotenv dependency
+    for one variable. Doesn't override an already-set env var."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_dotenv()
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
