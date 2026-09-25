@@ -5,9 +5,19 @@ Then open http://localhost:5000 in your browser.
 """
 
 import json
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
+
+# Windows consoles often default to cp1252, which chokes on non-ASCII
+# characters (e.g. the arrow in the startup banner below). Never let
+# printing crash the app.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
 
 from flask import Flask, render_template, jsonify
 
