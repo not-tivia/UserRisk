@@ -157,7 +157,16 @@ def post(payload):
         logging.error("DISCORD_WEBHOOK_URL not set — printing message instead of posting.")
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return
-    resp = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+    # A classic (non-application-owned) incoming webhook silently drops the
+    # "components" field — no error, message still posts fine, buttons just
+    # never render — UNLESS this query param is set. Confirmed live
+    # 2026-09-25 by checking the actual returned message body (?wait=true),
+    # not just the status code: without with_components=true, HTTP 204
+    # "succeeds" but the message has no components at all.
+    url = DISCORD_WEBHOOK_URL
+    if payload.get("components"):
+        url += ("&" if "?" in url else "?") + "with_components=true"
+    resp = requests.post(url, json=payload, timeout=15)
     if resp.status_code >= 300:
         logging.error(f"Discord post failed ({resp.status_code}): {resp.text[:300]}")
     time.sleep(POST_DELAY_SECONDS)
