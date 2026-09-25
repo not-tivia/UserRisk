@@ -5,6 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Runs as the deploying user, not root - avoids leaving root-owned files in
+# data/ that then break manual (non-sudo) runs of the same scripts. Change
+# this if deploying under a different account.
+User=willus
+Group=willus
 WorkingDirectory=/opt/raffle-dashboard
 EnvironmentFile=/opt/raffle-dashboard/.env
 ExecStart=/opt/raffle-dashboard/venv/bin/python discord_report.py
