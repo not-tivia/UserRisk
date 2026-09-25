@@ -121,10 +121,10 @@ def build_max_message(r):
     embed = {
         "title": f"@{r['user_name']} — {r['tier_badge']} — Risk {r['risk']}",
         "description": (
+            f"```\n!flag {r['wallet']}\n```\n"
             f"{_signal_bullets(r)}\n\n"
             f"SPL tokens: **{r.get('spl_token_count', '?')}**\n"
-            f"Collection: {r.get('collection_name') or '—'}\n\n"
-            f"```\n!flag {r['wallet']}\n```"
+            f"Collection: {r.get('collection_name') or '—'}"
         ),
         "color": COLOR_MAX,
         "footer": {"text": "Confidence: MAX — ready to flag"},
